@@ -26,6 +26,7 @@ const fetch  = require('node-fetch');
 const fs     = require('fs');
 const path   = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
 
 // ── CONFIG ───────────────────────────────────────────────
 const AUTOAPI_KEY  = process.env.AUTOAPI_KEY;
@@ -441,7 +442,10 @@ async function main() {
     process.exit(1);
   }
 
-  const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
+    global: { fetch: fetch },
+    realtime: { transport: ws },
+  });
   const lastChangeId = readLastChangeId();
 
   let totalSynced = 0;
