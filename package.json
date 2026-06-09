@@ -1,15 +1,15 @@
 {
-  "name": "tvmc-sync-encar",
+  "name": "tvmc-sync",
   "version": "1.0.0",
-  "description": "Synchronisation Encar → Supabase pour TaVoitureMoinsChère",
+  "description": "Sync auto-api.com Encar data to Supabase",
   "main": "sync-encar.js",
   "scripts": {
-    "sync": "node sync-encar.js",
-    "test": "node sync-encar.js --test"
+    "sync": "node sync-encar.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
-    "dotenv": "^16.3.1",
-    "node-fetch": "^2.7.0"
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^2.7.0",
+    "ws": "^8.18.0"
   }
 }
