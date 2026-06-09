@@ -1,299 +1,481 @@
 /**
  * ═══════════════════════════════════════════════════════
- *  SYNC ENCAR → SUPABASE — TaVoitureMoinsChère
- *  Script Node.js à exécuter en cron toutes les heures
- *  
- *  Installation :
- *    1. Uploader ce fichier dans /public_html/auto/sync/
- *    2. Créer /public_html/auto/sync/.env avec tes clés
- *    3. Dans Hostinger hPanel → Cron Jobs → ajouter :
- *       0 * * * * cd /home/u279863079/public_html/auto/sync && node sync-encar.js >> sync.log 2>&1
+ *  SYNC AUTO-API.COM → SUPABASE — TaVoitureMoinsChère
+ *  Fournisseur : auto-api.com (depuis 2017, aucune limite quota)
+ *  Doc : https://auto-api.com/documentation
  *
- *  Prérequis (dans /public_html/auto/sync/) :
- *    npm init -y
- *    npm install node-fetch @supabase/supabase-js dotenv
+ *  GitHub Secrets à configurer :
+ *    AUTOAPI_KEY    → MEBkasK6mKDfJkAQ9499
+ *    SUPABASE_URL   → https://xxxx.supabase.co
+ *    SUPABASE_KEY   → service_role key
+ *
+ *  SQL Supabase à exécuter UNE FOIS avant le premier sync :
+ *    ALTER TABLE voitures ADD COLUMN IF NOT EXISTS encar_id text UNIQUE;
+ *    ALTER TABLE voitures ADD COLUMN IF NOT EXISTS source text DEFAULT 'manual';
+ *    ALTER TABLE voitures ADD COLUMN IF NOT EXISTS last_seen_encar timestamptz;
+ *
+ *  Fonctionnement :
+ *    - 1er sync : charge toutes les annonces via /offers (pages complètes)
+ *    - Syncs suivants : récupère uniquement les changements via /changes
+ *    - Résultat : quasi zéro requêtes inutiles, catalogue toujours à jour
  * ═══════════════════════════════════════════════════════
  */
 
 require('dotenv').config();
-const fetch = require('node-fetch');
+const fetch  = require('node-fetch');
+const fs     = require('fs');
+const path   = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
-// ── CONFIG ──────────────────────────────────────────────
-const CARAPIS_KEY   = process.env.CARAPIS_KEY;   // Ta clé Carapis dans .env
-const SUPABASE_URL  = process.env.SUPABASE_URL;
-const SUPABASE_KEY  = process.env.SUPABASE_KEY;
-const CARAPIS_BASE  = 'https://api.carapis.com/encar';
+// ── CONFIG ───────────────────────────────────────────────
+const AUTOAPI_KEY  = process.env.AUTOAPI_KEY;
+const SUPABASE_URL   = process.env.SUPABASE_URL;
+const SUPABASE_KEY   = process.env.SUPABASE_KEY;
 
-// ── 22 MARQUES À IMPORTER ───────────────────────────────
-const MARQUES = [
-  'Toyota', 'Nissan', 'Honda', 'Lexus', 'Mitsubishi',
-  'Maserati', 'Volkswagen', 'Ford', 'Dodge', 'RAM',
-  'Chevrolet', 'Cadillac', 'Jeep', 'BMW', 'Mercedes',
-  'Audi', 'Porsche', 'Ferrari', 'Lamborghini', 'Bentley',
-  'Rolls-Royce', 'Aston Martin'
+const API_BASE = 'https://api1.auto-api.com/api/v2/encar';
+
+// Fichier local pour mémoriser le dernier change_id entre deux syncs
+const CHANGE_ID_FILE = path.join(__dirname, '.last_change_id');
+
+// ── 110 MODÈLES CIBLÉS TVMC ──────────────────────────────
+// Format : { mark, model, year_from?, year_to? }
+// Ces filtres sont passés directement à l'API /offers
+const CIBLES = [
+  // ── FORD ──────────────────────────────────────────────
+  { mark: 'Ford', model: 'Mustang',    year_from: 2015, year_to: 2024 },
+  { mark: 'Ford', model: 'F-150',      year_from: 2010, year_to: 2024 },
+  { mark: 'Ford', model: 'Expedition', year_from: 2018, year_to: 2024 },
+  { mark: 'Ford', model: 'Bronco',     year_from: 2021, year_to: 2024 },
+
+  // ── RAM ───────────────────────────────────────────────
+  { mark: 'RAM',  model: '1500',       year_from: 2010, year_to: 2024 },
+
+  // ── DODGE ─────────────────────────────────────────────
+  { mark: 'Dodge', model: 'Challenger' },
+  { mark: 'Dodge', model: 'Charger' },
+  { mark: 'Dodge', model: 'Durango' },
+
+  // ── CHEVROLET ─────────────────────────────────────────
+  { mark: 'Chevrolet', model: 'Camaro',   year_from: 2010, year_to: 2024 },
+  { mark: 'Chevrolet', model: 'Corvette' },
+  { mark: 'Chevrolet', model: 'Tahoe' },
+  { mark: 'Chevrolet', model: 'Suburban' },
+  { mark: 'Chevrolet', model: 'Silverado' },
+
+  // ── CADILLAC ──────────────────────────────────────────
+  { mark: 'Cadillac', model: 'Escalade' },
+
+  // ── JEEP ──────────────────────────────────────────────
+  { mark: 'Jeep', model: 'Wrangler',      year_from: 2007, year_to: 2024 },
+  { mark: 'Jeep', model: 'Gladiator' },
+  { mark: 'Jeep', model: 'Grand Cherokee' },
+
+  // ── VOLKSWAGEN ────────────────────────────────────────
+  { mark: 'Volkswagen', model: 'Golf R' },
+
+  // ── BMW ───────────────────────────────────────────────
+  { mark: 'BMW', model: 'M2' },
+  { mark: 'BMW', model: 'M3' },
+  { mark: 'BMW', model: 'M4' },
+  { mark: 'BMW', model: 'M5' },
+  { mark: 'BMW', model: 'X5 M' },
+  { mark: 'BMW', model: 'X6 M' },
+  { mark: 'BMW', model: 'M8' },
+
+  // ── MERCEDES-BENZ ─────────────────────────────────────
+  { mark: 'Mercedes-Benz', model: 'C-Class',   }, // C63 AMG
+  { mark: 'Mercedes-Benz', model: 'E-Class',   }, // E63 AMG
+  { mark: 'Mercedes-Benz', model: 'CLS-Class', }, // CLS63
+  { mark: 'Mercedes-Benz', model: 'G-Class',   }, // G63, G350, G400
+  { mark: 'Mercedes-Benz', model: 'S-Class',   }, // S63, S560
+  { mark: 'Mercedes-Benz', model: 'Maybach',   }, // Maybach S560, S650
+
+  // ── AUDI ──────────────────────────────────────────────
+  { mark: 'Audi', model: 'RS3' },
+  { mark: 'Audi', model: 'RS4' },
+  { mark: 'Audi', model: 'RS5' },
+  { mark: 'Audi', model: 'RS6' },
+  { mark: 'Audi', model: 'RS7' },
+  { mark: 'Audi', model: 'R8' },
+  { mark: 'Audi', model: 'SQ5' },
+  { mark: 'Audi', model: 'SQ7' },
+  { mark: 'Audi', model: 'SQ8' },
+  { mark: 'Audi', model: 'RS Q8' },
+
+  // ── PORSCHE ───────────────────────────────────────────
+  { mark: 'Porsche', model: 'Cayman' },
+  { mark: 'Porsche', model: 'Boxster' },
+  { mark: 'Porsche', model: '911' },
+  { mark: 'Porsche', model: 'Panamera' },
+  { mark: 'Porsche', model: 'Cayenne' },
+
+  // ── NISSAN ────────────────────────────────────────────
+  { mark: 'Nissan', model: '350Z' },
+  { mark: 'Nissan', model: '370Z' },
+  { mark: 'Nissan', model: 'GT-R' },
+  { mark: 'Nissan', model: 'Silvia' },
+  { mark: 'Nissan', model: 'Skyline' },
+
+  // ── TOYOTA ────────────────────────────────────────────
+  { mark: 'Toyota', model: 'Land Cruiser' },
+  { mark: 'Toyota', model: 'Land Cruiser Prado' },
+
+  // ── LEXUS ─────────────────────────────────────────────
+  { mark: 'Lexus', model: 'IS F' },
+  { mark: 'Lexus', model: 'GS F' },
+  { mark: 'Lexus', model: 'RC F' },
+  { mark: 'Lexus', model: 'LC' },
+  { mark: 'Lexus', model: 'LX' },
+
+  // ── HONDA ─────────────────────────────────────────────
+  { mark: 'Honda', model: 'Civic Type R' },
+  { mark: 'Honda', model: 'S2000' },
+  { mark: 'Honda', model: 'NSX' },
+
+  // ── MAZDA ─────────────────────────────────────────────
+  { mark: 'Mazda', model: 'RX-7' },
+  { mark: 'Mazda', model: 'RX-8' },
+  { mark: 'Mazda', model: 'MX-5' },
+
+  // ── MITSUBISHI ────────────────────────────────────────
+  { mark: 'Mitsubishi', model: 'Lancer Evolution' },
+  { mark: 'Mitsubishi', model: 'Pajero' },
+
+  // ── SUBARU ────────────────────────────────────────────
+  { mark: 'Subaru', model: 'Impreza WRX STI' },
+  { mark: 'Subaru', model: 'Levorg' },
+
+  // ── BENTLEY ───────────────────────────────────────────
+  { mark: 'Bentley', model: 'Continental GT' },
+  { mark: 'Bentley', model: 'Flying Spur' },
+  { mark: 'Bentley', model: 'Bentayga' },
+
+  // ── ROLLS-ROYCE ───────────────────────────────────────
+  { mark: 'Rolls-Royce', model: 'Ghost' },
+  { mark: 'Rolls-Royce', model: 'Wraith' },
+  { mark: 'Rolls-Royce', model: 'Dawn' },
+
+  // ── MASERATI ──────────────────────────────────────────
+  { mark: 'Maserati', model: 'GranTurismo' },
+  { mark: 'Maserati', model: 'GranCabrio' },
+  { mark: 'Maserati', model: 'Levante' },
+
+  // ── FERRARI ───────────────────────────────────────────
+  { mark: 'Ferrari', model: 'F430' },
+  { mark: 'Ferrari', model: '458' },
+  { mark: 'Ferrari', model: 'California' },
+  { mark: 'Ferrari', model: 'F12' },
+
+  // ── LAMBORGHINI ───────────────────────────────────────
+  { mark: 'Lamborghini', model: 'Gallardo' },
+  { mark: 'Lamborghini', model: 'Huracan' },
+  { mark: 'Lamborghini', model: 'Urus' },
+
+  // ── ASTON MARTIN ──────────────────────────────────────
+  { mark: 'Aston Martin', model: 'DB9' },
+  { mark: 'Aston Martin', model: 'Vantage' },
+  { mark: 'Aston Martin', model: 'DB11' },
 ];
 
-// Correspondances noms anglais → noms Encar (coréen/anglais)
-const MARQUE_MAP = {
-  'Mercedes':     'Mercedes-Benz',
-  'Rolls-Royce':  'Rolls Royce',
-  'Aston Martin': 'Aston Martin',
-  'RAM':          'Ram',
-};
-
-// ── CONVERSION KRW → EUR ────────────────────────────────
-const KRW_TO_EUR = 0.00067; // Taux approximatif — met à jour régulièrement
-
-function krwToEur(krw) {
-  return Math.round((krw || 0) * KRW_TO_EUR);
+// ── HELPERS ─────────────────────────────────────────────
+// Prix auto-api : unités de 10 000 KRW → EUR
+function priceToEur(price) {
+  if (!price) return 0;
+  const krw = price * 10000;
+  return Math.round(krw * 0.00067);
 }
 
-// ── CORRESPONDANCE CARBURANT ────────────────────────────
-function mapCarburant(fuel) {
-  if (!fuel) return 'Essence';
-  const f = fuel.toLowerCase();
-  if (f.includes('diesel')) return 'Diesel';
-  if (f.includes('hybrid') || f.includes('hybride')) return 'Hybride';
-  if (f.includes('electric') || f.includes('electrique')) return 'Electrique';
-  if (f.includes('lpg') || f.includes('gpl')) return 'GPL';
+function mapCarburant(engine_type) {
+  if (!engine_type) return 'Essence';
+  const e = engine_type.toLowerCase();
+  if (e.includes('diesel'))               return 'Diesel';
+  if (e.includes('hybrid'))               return 'Hybride';
+  if (e.includes('electric'))             return 'Electrique';
+  if (e.includes('lpg') || e.includes('gpl')) return 'GPL';
   return 'Essence';
 }
 
-// ── CORRESPONDANCE TRANSMISSION ─────────────────────────
 function mapTransmission(tr) {
   if (!tr) return 'Automatique';
   const t = tr.toLowerCase();
-  if (t.includes('manual') || t.includes('manuelle')) return 'Manuelle';
-  if (t.includes('cvt')) return 'CVT';
-  if (t.includes('dct') || t.includes('dsg')) return 'DCT';
+  if (t.includes('manual'))              return 'Manuelle';
+  if (t.includes('cvt'))                 return 'CVT';
+  if (t.includes('semi'))                return 'DCT';
   return 'Automatique';
 }
 
-// ── CYLINDRÉE EN CC DEPUIS ENGINE_SIZE ──────────────────
-function engineToCc(engineSize) {
-  if (!engineSize) return 0;
-  // "2.0L" → 2000, "3.5L" → 3500
-  const match = String(engineSize).match(/([\d.]+)\s*[lL]/);
-  if (match) return Math.round(parseFloat(match[1]) * 1000);
-  // Valeur directe en cc
-  const num = parseInt(engineSize);
-  if (num > 100) return num;
-  return 0;
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── REQUÊTE /offers ──────────────────────────────────────
+async function fetchOffers(cible, page = 1) {
+  const params = new URLSearchParams({ api_key: AUTOAPI_KEY, page });
+  if (cible.mark)      params.append('mark',      cible.mark);
+  if (cible.model)     params.append('model',     cible.model);
+  if (cible.year_from) params.append('year_from', cible.year_from);
+  if (cible.year_to)   params.append('year_to',   cible.year_to);
+
+  const res = await fetch(`${API_BASE}/offers?${params}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status} — ${body.substring(0, 200)}`);
+  }
+  return res.json();
 }
 
-// ── REQUÊTE API CARAPIS ─────────────────────────────────
-async function fetchEncar(brand, offset = 0) {
-  const apiName = MARQUE_MAP[brand] || brand;
-  const url = `${CARAPIS_BASE}/vehicles?brand=${encodeURIComponent(apiName)}&limit=100&offset=${offset}`;
-  const res = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${CARAPIS_KEY}` }
-  });
-  if (!res.ok) throw new Error(`API error ${res.status} pour ${brand}`);
+// ── REQUÊTE /changes ─────────────────────────────────────
+async function fetchChanges(changeId) {
+  const res = await fetch(`${API_BASE}/changes?api_key=${AUTOAPI_KEY}&change_id=${changeId}`);
+  if (!res.ok) throw new Error(`/changes HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchChangeIdForDate(date) {
+  const res = await fetch(`${API_BASE}/change_id?api_key=${AUTOAPI_KEY}&date=${date}`);
+  if (!res.ok) throw new Error(`/change_id HTTP ${res.status}`);
   const json = await res.json();
-  return json.data || {};
+  return json.change_id;
 }
 
-// ── TRANSFORMER UN VÉHICULE ENCAR → FORMAT SUPABASE ─────
-function transformVehicle(car, marque) {
-  const prixKRW = car.price || car.Price || 0;
-  const prixEUR = krwToEur(prixKRW);
+// ── TRANSFORMER → FORMAT SUPABASE ────────────────────────
+function transformOffer(item) {
+  const car = item.data || item;
+  const marqueAffichage = (car.mark || '').replace('Mercedes-Benz', 'Mercedes');
 
   return {
-    // Identifiant externe pour éviter les doublons
-    encar_id:        String(car.id || car.Id || ''),
-    source:          'encar',
-
-    // Infos véhicule
-    marque:          marque,
-    modele:          car.model || car.Model || car.title || '',
-    annee:           parseInt(car.year || car.Year) || 2020,
-    km:              parseInt(car.mileage || car.Mileage) || 0,
-    prix:            prixEUR,
-    pays:            'KR',
-
-    // Specs
-    carburant:       mapCarburant(car.fuel_type || car.FuelType),
-    carbu:           mapCarburant(car.fuel_type || car.FuelType),
-    transmission:    mapTransmission(car.transmission || car.Transmission),
-    cyl:             engineToCc(car.engine_size || car.EngineSize),
-    puissance:       parseInt(car.horsepower || car.Horsepower) || 0,
-    couleur_ext:     car.color || car.Color || '',
-    type_vehicule:   car.body_type || car.BodyType || 'Berline',
-    nb_portes:       parseInt(car.doors || car.Doors) || 4,
-    etat_general:    car.condition || 'Bon',
-
-    // Description & historique
-    description:     car.description || '',
-    historique:      car.history ? `Accidents: ${car.history.accidents || 0} | Propriétaires: ${car.history.owners || 1}` : '',
-
-    // Photo principale
-    photo_url:       (car.images && car.images.length) ? car.images[0] : (car.image || ''),
-
-    // Statut
-    statut:          'pub',
-    mode_vente:      'marche',
-    homolog_ok:      false,  // À vérifier manuellement
+    encar_id:            String(car.inner_id || car.id || ''),
+    source:              'encar',
+    marque:              marqueAffichage,
+    modele:              car.model || '',
+    annee:               parseInt(car.year) || 2020,
+    km:                  parseInt(car.km_age) || 0,
+    prix:                priceToEur(car.price),
+    pays:                'KR',
+    carburant:           mapCarburant(car.engine_type),
+    carbu:               mapCarburant(car.engine_type),
+    transmission:        mapTransmission(car.transmission_type),
+    cyl:                 parseInt(car.displacement) || 0,
+    puissance:           parseInt(car.power || car.power_ice_hp) || 0,
+    couleur_ext:         car.color || '',
+    type_vehicule:       car.body_type || 'Berline',
+    nb_portes:           4,
+    etat_general:        'Bon',
+    description:         car.description || '',
+    historique:          car.extra?.accidents?.length
+      ? `Accidents: ${car.extra.accidents.length}`
+      : '',
+    photo_url:           Array.isArray(car.images) && car.images.length
+      ? car.images[0]
+      : '',
+    statut:              'pub',
+    mode_vente:          'marche',
+    homolog_ok:          false,
     homolog_autres_pays: true,
-    export_possible: true,
-    frais_sup:       0,
-
-    // Métadonnées
-    spec:            'Corée du Sud',
-    created_at:      new Date().toISOString(),
-    updated_at:      new Date().toISOString(),
+    export_possible:     true,
+    frais_sup:           0,
+    spec:                'Corée du Sud',
+    last_seen_encar:     new Date().toISOString(),
+    updated_at:          new Date().toISOString(),
   };
 }
 
-// ── SYNC UNE MARQUE ─────────────────────────────────────
-async function syncMarque(sb, marque) {
-  console.log(`\n🔄 Syncing ${marque}...`);
-  let offset = 0;
+// ── UPSERT UN VÉHICULE ───────────────────────────────────
+async function upsertVehicle(sb, item) {
+  const car     = item.data || item;
+  const encarId = String(car.inner_id || car.id || '');
+  if (!encarId) return;
+
+  const payload = transformOffer(item);
+
+  const { error } = await sb
+    .from('voitures')
+    .upsert(payload, { onConflict: 'encar_id', ignoreDuplicates: false });
+
+  if (error) {
+    console.log(`    ❌ Upsert ${encarId}: ${error.message}`);
+    return;
+  }
+
+  // Photos supplémentaires
+  if (Array.isArray(car.images) && car.images.length > 1) {
+    const { data: row } = await sb
+      .from('voitures').select('id').eq('encar_id', encarId).single();
+    if (row) {
+      await sb.from('voiture_photos').delete().eq('voiture_id', row.id);
+      await sb.from('voiture_photos').insert(
+        car.images.map((url, i) => ({ voiture_id: row.id, url, position: i }))
+      );
+    }
+  }
+}
+
+// ── SYNC INITIAL : toutes les annonces par modèle ────────
+async function syncInitial(sb) {
+  console.log('\n📥 MODE INITIAL — Chargement complet par modèle ciblé');
   let total = 0;
-  let inserted = 0;
-  let updated = 0;
+
+  for (const cible of CIBLES) {
+    const label = `${cible.mark} ${cible.model}`;
+    let page = 1;
+    let pageTotal = 0;
+
+    while (true) {
+      let json;
+      try {
+        json = await fetchOffers(cible, page);
+      } catch (err) {
+        console.log(`  ⚠️  ${label} p.${page}: ${err.message}`);
+        break;
+      }
+
+      const items = json.result || [];
+      if (!items.length) break;
+
+      for (const item of items) await upsertVehicle(sb, item);
+      pageTotal += items.length;
+
+      // Continuer si page suivante disponible
+      if (!json.meta?.next_page) break;
+      page++;
+      await sleep(400);
+    }
+
+    if (pageTotal > 0) console.log(`  ✅ ${label}: ${pageTotal} annonces`);
+    else console.log(`  ℹ️  ${label}: aucun résultat`);
+
+    total += pageTotal;
+    await sleep(300);
+  }
+
+  return total;
+}
+
+// ── SYNC INCRÉMENTAL : uniquement les changements ────────
+async function syncIncremntal(sb, lastChangeId) {
+  console.log(`\n🔄 MODE INCRÉMENTAL — changements depuis ID ${lastChangeId}`);
+  let changeId   = lastChangeId;
+  let added = 0, updated = 0, removed = 0;
 
   while (true) {
-    let data;
+    let json;
     try {
-      data = await fetchEncar(marque, offset);
+      json = await fetchChanges(changeId);
     } catch (err) {
-      console.log(`  ⚠️ Erreur API pour ${marque}: ${err.message}`);
+      console.log(`  ⚠️  /changes: ${err.message}`);
       break;
     }
 
-    const vehicles = data.vehicles || [];
-    total = data.total || vehicles.length;
+    const changes = json.result || [];
+    if (!changes.length) break;
 
-    if (!vehicles.length) break;
-
-    for (const car of vehicles) {
-      const encarId = String(car.id || car.Id || '');
+    for (const change of changes) {
+      const encarId = String(change.inner_id || '');
       if (!encarId) continue;
 
-      const payload = transformVehicle(car, marque);
-
-      // Upsert : insert ou update si encar_id existe déjà
-      const { error } = await sb
-        .from('voitures')
-        .upsert(payload, { onConflict: 'encar_id', ignoreDuplicates: false });
-
-      if (error) {
-        console.log(`  ❌ Erreur upsert ${encarId}: ${error.message}`);
-      } else {
-        inserted++;
-      }
-
-      // Sauvegarder les photos dans voiture_photos
-      if (car.images && car.images.length > 1) {
-        // On récupère l'ID Supabase du véhicule inséré
-        const { data: row } = await sb
-          .from('voitures')
-          .select('id')
-          .eq('encar_id', encarId)
-          .single();
-
-        if (row) {
-          // Supprimer les anciennes photos
-          await sb.from('voiture_photos').delete().eq('voiture_id', row.id);
-          // Insérer les nouvelles
-          const photos = car.images.map((url, i) => ({
-            voiture_id: row.id,
-            url,
-            position: i
-          }));
-          await sb.from('voiture_photos').insert(photos);
+      if (change.change_type === 'removed') {
+        // Annonce retirée → passer en draft
+        await sb.from('voitures')
+          .update({ statut: 'draft', updated_at: new Date().toISOString() })
+          .eq('encar_id', encarId);
+        removed++;
+      } else if (change.change_type === 'changed') {
+        // Mise à jour prix uniquement
+        if (change.data?.new_price) {
+          await sb.from('voitures')
+            .update({
+              prix:       priceToEur(change.data.new_price),
+              updated_at: new Date().toISOString(),
+              last_seen_encar: new Date().toISOString(),
+            })
+            .eq('encar_id', encarId);
+          updated++;
+        }
+      } else if (change.change_type === 'added') {
+        // Nouvelle annonce — vérifier si elle correspond à nos cibles
+        const car = change.data || {};
+        const isCible = CIBLES.some(c =>
+          c.mark.toLowerCase() === (car.mark || '').toLowerCase() &&
+          (car.model || '').toLowerCase().includes(c.model.toLowerCase())
+        );
+        if (isCible) {
+          await upsertVehicle(sb, change);
+          added++;
         }
       }
     }
 
-    offset += vehicles.length;
-    console.log(`  ✅ ${offset}/${total} véhicules traités`);
-
-    // Stop si on a tout récupéré
-    if (offset >= total || vehicles.length < 100) break;
-
-    // Petite pause pour ne pas surcharger l'API
-    await new Promise(r => setTimeout(r, 500));
+    // Avancer dans le flux de changements
+    changeId = json.meta?.next_change_id;
+    if (!changeId || changes.length < 20) break;
+    await sleep(200);
   }
 
-  return inserted;
+  console.log(`  ✅ +${added} ajoutées | ~${updated} prix mis à jour | 🗑️ ${removed} retirées`);
+  return changeId;
 }
 
-// ── SUPPRIMER LES ANNONCES RETIRÉES D'ENCAR ────────────
-async function cleanupSupprimees(sb) {
-  console.log('\n🧹 Vérification des annonces supprimées...');
-  
-  // Récupérer tous les encar_id actifs dans Supabase
-  const { data: rows } = await sb
-    .from('voitures')
-    .select('id, encar_id')
-    .eq('source', 'encar')
-    .eq('statut', 'pub');
-
-  if (!rows || !rows.length) return;
-
-  let supprimees = 0;
-  for (const row of rows) {
-    // Vérifier si le véhicule existe encore sur Encar
-    try {
-      const res = await fetch(`${CARAPIS_BASE}/vehicle/${row.encar_id}`, {
-        headers: { 'Authorization': `Bearer ${CARAPIS_KEY}` }
-      });
-      if (res.status === 404) {
-        // Annonce supprimée → on passe en brouillon
-        await sb.from('voitures').update({ statut: 'draft' }).eq('id', row.id);
-        supprimees++;
-        console.log(`  🗑️ Annonce ${row.encar_id} retirée (plus disponible sur Encar)`);
-      }
-      await new Promise(r => setTimeout(r, 200));
-    } catch (e) {
-      // Ignorer les erreurs réseau
-    }
+// ── LECTURE / ÉCRITURE DU DERNIER CHANGE_ID ─────────────
+function readLastChangeId() {
+  try {
+    return parseInt(fs.readFileSync(CHANGE_ID_FILE, 'utf8').trim());
+  } catch {
+    return null;
   }
-
-  console.log(`  ✅ ${supprimees} annonces retirées`);
 }
 
-// ── MAIN ─────────────────────────────────────────────────
+function saveLastChangeId(id) {
+  fs.writeFileSync(CHANGE_ID_FILE, String(id));
+}
+
+// ── MAIN ────────────────────────────────────────────────
 async function main() {
-  console.log('═══════════════════════════════════════════');
-  console.log(`🚀 SYNC ENCAR → SUPABASE — ${new Date().toLocaleString('fr-FR')}`);
-  console.log('═══════════════════════════════════════════');
+  const startTime = Date.now();
 
-  if (!CARAPIS_KEY || !SUPABASE_URL || !SUPABASE_KEY) {
-    console.error('❌ Variables .env manquantes. Vérifie CARAPIS_KEY, SUPABASE_URL, SUPABASE_KEY');
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`🚀 SYNC AUTO-API.COM → SUPABASE — ${new Date().toLocaleString('fr-FR')}`);
+  console.log(`📊 Fournisseur : auto-api.com | Aucune limite quota`);
+  console.log(`⚙️  Modèles ciblés : ${CIBLES.length}`);
+  console.log('═══════════════════════════════════════════════════════');
+
+  if (!AUTOAPI_KEY || !SUPABASE_URL || !SUPABASE_KEY) {
+    console.error('❌ Variables manquantes : AUTOAPI_KEY, SUPABASE_URL, SUPABASE_KEY');
     process.exit(1);
   }
 
-  // Vérifier si la colonne encar_id existe dans Supabase
-  console.log('\n📋 Vérification de la structure Supabase...');
-  console.log('   → Exécute ce SQL dans Supabase > SQL Editor si ce n\'est pas fait :');
-  console.log('   ALTER TABLE voitures ADD COLUMN IF NOT EXISTS encar_id text UNIQUE;');
-  console.log('   ALTER TABLE voitures ADD COLUMN IF NOT EXISTS source text DEFAULT \'manual\';');
-
   const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
-  let totalInserted = 0;
+  const lastChangeId = readLastChangeId();
 
-  for (const marque of MARQUES) {
+  let totalSynced = 0;
+  let newChangeId = null;
+
+  if (!lastChangeId) {
+    // ── PREMIER LANCEMENT : sync complet ──
+    console.log('\n🆕 Premier lancement détecté → sync initial complet');
+    totalSynced = await syncInitial(sb);
+
+    // Récupérer le change_id d'aujourd'hui pour les prochains syncs
+    const today = new Date().toISOString().split('T')[0];
     try {
-      const n = await syncMarque(sb, marque);
-      totalInserted += n;
-    } catch (err) {
-      console.log(`❌ Erreur sync ${marque}: ${err.message}`);
+      newChangeId = await fetchChangeIdForDate(today);
+      saveLastChangeId(newChangeId);
+      console.log(`\n💾 Change ID sauvegardé : ${newChangeId}`);
+    } catch (e) {
+      console.log(`  ⚠️  Impossible de récupérer le change_id: ${e.message}`);
+    }
+  } else {
+    // ── SYNCS SUIVANTS : incrémental uniquement ──
+    newChangeId = await syncIncremntal(sb, lastChangeId);
+    if (newChangeId) {
+      saveLastChangeId(newChangeId);
+      console.log(`\n💾 Nouveau change ID sauvegardé : ${newChangeId}`);
     }
   }
 
-  // Nettoyage des annonces supprimées (1x par jour seulement, pas toutes les heures)
-  const heure = new Date().getHours();
-  if (heure === 3) { // Nettoyage à 3h du matin
-    await cleanupSupprimees(sb);
-  }
-
-  console.log('\n═══════════════════════════════════════════');
-  console.log(`✅ SYNC TERMINÉE — ${totalInserted} véhicules traités`);
-  console.log(`⏰ Prochain sync dans 1 heure`);
-  console.log('═══════════════════════════════════════════\n');
+  const duration = Math.round((Date.now() - startTime) / 1000);
+  console.log('\n═══════════════════════════════════════════════════════');
+  console.log(`✅ SYNC TERMINÉE en ${duration}s`);
+  if (totalSynced) console.log(`📦 ${totalSynced} véhicules chargés (sync initial)`);
+  console.log(`⏰ Prochain sync dans 24h`);
+  console.log('═══════════════════════════════════════════════════════\n');
 }
 
 main().catch(err => {
