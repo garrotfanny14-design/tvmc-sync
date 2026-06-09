@@ -1,0 +1,26 @@
+name: Diagnostic Encar Models
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run diagnostic
+        env:
+          AUTOAPI_KEY: ${{ secrets.AUTOAPI_KEY }}
+        run: node diagnostic.js
