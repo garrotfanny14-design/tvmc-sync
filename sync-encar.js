@@ -379,10 +379,13 @@ async function syncIncremntal(sb, lastChangeId) {
       } else if (change.change_type === 'added') {
         // Nouvelle annonce — vérifier si elle correspond à nos cibles
         const car = change.data || {};
-        const isCible = CIBLES.some(c =>
-          c.mark.toLowerCase() === (car.mark || '').toLowerCase() &&
-          (car.model || '').toLowerCase().includes(c.model.toLowerCase())
-        );
+        const isCible = CIBLES.some(c => {
+          const markMatch = c.mark.toLowerCase() === (car.mark || '').toLowerCase();
+          if (!markMatch) return false;
+          // Si pas de modèle ciblé → toute la marque est acceptée
+          if (!c.model) return true;
+          return (car.model || '').toLowerCase().includes(c.model.toLowerCase());
+        });
         if (isCible) {
           await upsertVehicle(sb, change);
           added++;
