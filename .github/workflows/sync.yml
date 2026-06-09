@@ -19,34 +19,30 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: sync/package-lock.json
 
       - name: Install dependencies
-        working-directory: sync
-        run: npm ci
+        run: npm install
 
       # Restaure le fichier .last_change_id entre les runs
       - name: Restore change_id cache
         uses: actions/cache@v4
         with:
-          path: sync/.last_change_id
+          path: .last_change_id
           key: last-change-id-${{ github.ref }}
           restore-keys: last-change-id-
 
       - name: Run sync
-        working-directory: sync
         env:
-          AUTOAPI_KEY:    ${{ secrets.AUTOAPI_KEY }}
-          SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
-        run: node sync-autoapi.js
+          AUTOAPI_KEY:  ${{ secrets.AUTOAPI_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: node sync-encar.js
 
       # Sauvegarde le .last_change_id pour le prochain run
       - name: Save change_id cache
         uses: actions/cache@v4
         with:
-          path: sync/.last_change_id
+          path: .last_change_id
           key: last-change-id-${{ github.ref }}-${{ github.run_number }}
 
       - name: Upload log
@@ -54,5 +50,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sync-log-${{ github.run_number }}
-          path: sync/sync.log
+          path: sync.log
           retention-days: 30
