@@ -44,56 +44,53 @@ const CHANGE_ID_FILE = path.join(__dirname, '.last_change_id');
 const CIBLES = [
   // ── FORD ──────────────────────────────────────────────
   { mark: 'Ford', model: 'Mustang',    year_from: 2015, year_to: 2024 },
-  { mark: 'Ford', model: 'F-150',      year_from: 2010, year_to: 2024 },
+  { mark: 'Ford', model: 'F150',       year_from: 2010, year_to: 2024 }, // F150 sans tiret
   { mark: 'Ford', model: 'Expedition', year_from: 2018, year_to: 2024 },
   { mark: 'Ford', model: 'Bronco',     year_from: 2021, year_to: 2024 },
 
-  // ── RAM ───────────────────────────────────────────────
-  { mark: 'RAM',  model: '1500',       year_from: 2010, year_to: 2024 },
-
-  // ── DODGE ─────────────────────────────────────────────
+  // ── DODGE (inclut RAM Pick Up) ────────────────────────
   { mark: 'Dodge', model: 'Challenger' },
   { mark: 'Dodge', model: 'Charger' },
-  { mark: 'Dodge', model: 'Durango' },
+  { mark: 'Dodge', model: 'Ram Pick Up', year_from: 2010, year_to: 2024 }, // RAM 1500 sous Dodge
 
   // ── CHEVROLET ─────────────────────────────────────────
-  { mark: 'Chevrolet', model: 'Camaro',   year_from: 2010, year_to: 2024 },
+  { mark: 'Chevrolet', model: 'Camaro',    year_from: 2010, year_to: 2024 },
   { mark: 'Chevrolet', model: 'Corvette' },
   { mark: 'Chevrolet', model: 'Tahoe' },
-  { mark: 'Chevrolet', model: 'Suburban' },
+  { mark: 'Chevrolet', model: 'Surburban' }, // typo Encar
   { mark: 'Chevrolet', model: 'Silverado' },
 
   // ── CADILLAC ──────────────────────────────────────────
   { mark: 'Cadillac', model: 'Escalade' },
 
   // ── JEEP ──────────────────────────────────────────────
-  { mark: 'Jeep', model: 'Wrangler',      year_from: 2007, year_to: 2024 },
+  { mark: 'Jeep', model: 'Wrangler',  year_from: 2007, year_to: 2024 },
   { mark: 'Jeep', model: 'Gladiator' },
-  { mark: 'Jeep', model: 'Grand Cherokee' },
+  { mark: 'Jeep', model: 'Cherokee' }, // Grand Cherokee = Cherokee sur Encar
 
   // ── VOLKSWAGEN ────────────────────────────────────────
-  { mark: 'Volkswagen', model: 'Golf R' },
+  { mark: 'Volkswagen', model: 'Golf' }, // Golf R inclus dans Golf
 
   // ── BMW ───────────────────────────────────────────────
   { mark: 'BMW', model: 'M2' },
   { mark: 'BMW', model: 'M3' },
   { mark: 'BMW', model: 'M4' },
   { mark: 'BMW', model: 'M5' },
-  { mark: 'BMW', model: 'X5 M' },
-  { mark: 'BMW', model: 'X6 M' },
+  { mark: 'BMW', model: 'X5M' }, // sans espace
+  { mark: 'BMW', model: 'X6M' }, // sans espace
   { mark: 'BMW', model: 'M8' },
 
   // ── MERCEDES-BENZ ─────────────────────────────────────
-  { mark: 'Mercedes-Benz', model: 'C-Class',   }, // C63 AMG
-  { mark: 'Mercedes-Benz', model: 'E-Class',   }, // E63 AMG
-  { mark: 'Mercedes-Benz', model: 'CLS-Class', }, // CLS63
-  { mark: 'Mercedes-Benz', model: 'G-Class',   }, // G63, G350, G400
-  { mark: 'Mercedes-Benz', model: 'S-Class',   }, // S63, S560
-  { mark: 'Mercedes-Benz', model: 'Maybach',   }, // Maybach S560, S650
+  { mark: 'Mercedes-Benz', model: 'C-Class'   }, // C63 AMG
+  { mark: 'Mercedes-Benz', model: 'E-Class'   }, // E63 AMG
+  { mark: 'Mercedes-Benz', model: 'CLS-Class' }, // CLS63
+  { mark: 'Mercedes-Benz', model: 'G-Class'   }, // G63, G350, G400
+  { mark: 'Mercedes-Benz', model: 'S-Class'   }, // S63, S560
+  // Maybach absent sur Encar
 
   // ── AUDI ──────────────────────────────────────────────
   { mark: 'Audi', model: 'RS3' },
-  { mark: 'Audi', model: 'RS4' },
+  // RS4 absent sur Encar
   { mark: 'Audi', model: 'RS5' },
   { mark: 'Audi', model: 'RS6' },
   { mark: 'Audi', model: 'RS7' },
@@ -101,7 +98,7 @@ const CIBLES = [
   { mark: 'Audi', model: 'SQ5' },
   { mark: 'Audi', model: 'SQ7' },
   { mark: 'Audi', model: 'SQ8' },
-  { mark: 'Audi', model: 'RS Q8' },
+  { mark: 'Audi', model: 'RSQ8' }, // sans espace
 
   // ── PORSCHE ───────────────────────────────────────────
   { mark: 'Porsche', model: 'Cayman' },
@@ -114,68 +111,57 @@ const CIBLES = [
   { mark: 'Nissan', model: '350Z' },
   { mark: 'Nissan', model: '370Z' },
   { mark: 'Nissan', model: 'GT-R' },
-  { mark: 'Nissan', model: 'Silvia' },
+  // Silvia absent sur Encar
   { mark: 'Nissan', model: 'Skyline' },
 
   // ── TOYOTA ────────────────────────────────────────────
-  { mark: 'Toyota', model: 'Land Cruiser' },
-  { mark: 'Toyota', model: 'Land Cruiser Prado' },
+  // Land Cruiser absent → FJ Cruiser + 4Runner + Supra
+  { mark: 'Toyota', model: 'FJ Cruiser' },
+  { mark: 'Toyota', model: '4Runner' },
+  { mark: 'Toyota', model: 'Supra' },
 
   // ── LEXUS ─────────────────────────────────────────────
-  { mark: 'Lexus', model: 'IS F' },
-  { mark: 'Lexus', model: 'GS F' },
-  { mark: 'Lexus', model: 'RC F' },
-  { mark: 'Lexus', model: 'LC' },
+  { mark: 'Lexus', model: 'IS' }, // IS F inclus
+  { mark: 'Lexus', model: 'GS' }, // GS F inclus
+  // RC F et LC absents sur Encar
   { mark: 'Lexus', model: 'LX' },
 
   // ── HONDA ─────────────────────────────────────────────
-  { mark: 'Honda', model: 'Civic Type R' },
-  { mark: 'Honda', model: 'S2000' },
-  { mark: 'Honda', model: 'NSX' },
+  { mark: 'Honda', model: 'Civic' }, // Civic Type R inclus
+  // S2000 et NSX absents sur Encar
 
   // ── MAZDA ─────────────────────────────────────────────
-  { mark: 'Mazda', model: 'RX-7' },
-  { mark: 'Mazda', model: 'RX-8' },
-  { mark: 'Mazda', model: 'MX-5' },
+  // RX-7 et RX-8 absents sur Encar
+  { mark: 'Mazda', model: 'MX-5 Miata' }, // nom exact Encar
 
   // ── MITSUBISHI ────────────────────────────────────────
   { mark: 'Mitsubishi', model: 'Lancer Evolution' },
   { mark: 'Mitsubishi', model: 'Pajero' },
 
   // ── SUBARU ────────────────────────────────────────────
-  { mark: 'Subaru', model: 'Impreza WRX STI' },
+  { mark: 'Subaru', model: 'Impreza' }, // WRX STI inclus
   { mark: 'Subaru', model: 'Levorg' },
 
-  // ── BENTLEY ───────────────────────────────────────────
-  { mark: 'Bentley', model: 'Continental GT' },
-  { mark: 'Bentley', model: 'Flying Spur' },
-  { mark: 'Bentley', model: 'Bentayga' },
+  // ── BENTLEY — toute la marque ────────────────────────
+  { mark: 'Bentley' },
 
-  // ── ROLLS-ROYCE ───────────────────────────────────────
-  { mark: 'Rolls-Royce', model: 'Ghost' },
-  { mark: 'Rolls-Royce', model: 'Wraith' },
-  { mark: 'Rolls-Royce', model: 'Dawn' },
+  // ── ROLLS-ROYCE — toute la marque ────────────────────
+  { mark: 'Rolls-Royce' },
 
-  // ── MASERATI ──────────────────────────────────────────
-  { mark: 'Maserati', model: 'GranTurismo' },
-  { mark: 'Maserati', model: 'GranCabrio' },
-  { mark: 'Maserati', model: 'Levante' },
+  // ── MASERATI — toute la marque ───────────────────────
+  { mark: 'Maserati' },
 
-  // ── FERRARI ───────────────────────────────────────────
-  { mark: 'Ferrari', model: 'F430' },
-  { mark: 'Ferrari', model: '458' },
-  { mark: 'Ferrari', model: 'California' },
-  { mark: 'Ferrari', model: 'F12' },
+  // ── FERRARI — toute la marque ─────────────────────────
+  { mark: 'Ferrari' },
 
-  // ── LAMBORGHINI ───────────────────────────────────────
-  { mark: 'Lamborghini', model: 'Gallardo' },
-  { mark: 'Lamborghini', model: 'Huracan' },
-  { mark: 'Lamborghini', model: 'Urus' },
+  // ── LAMBORGHINI — toute la marque ────────────────────
+  { mark: 'Lamborghini' },
 
-  // ── ASTON MARTIN ──────────────────────────────────────
-  { mark: 'Aston Martin', model: 'DB9' },
-  { mark: 'Aston Martin', model: 'Vantage' },
-  { mark: 'Aston Martin', model: 'DB11' },
+  // ── MAYBACH — marque séparée sur Encar ───────────────
+  { mark: 'Maybach' },
+
+  // ── ASTON MARTIN — nom attaché sur Encar ─────────────
+  { mark: 'Astonmartin' },
 ];
 
 // ── HELPERS ─────────────────────────────────────────────
@@ -315,7 +301,7 @@ async function syncInitial(sb) {
   let total = 0;
 
   for (const cible of CIBLES) {
-    const label = `${cible.mark} ${cible.model}`;
+    const label = cible.model ? `${cible.mark} ${cible.model}` : cible.mark;
     let page = 1;
     let pageTotal = 0;
 
