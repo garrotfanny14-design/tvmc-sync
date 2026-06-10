@@ -23,4 +23,4 @@ jobs:
       - name: Run diagnostic
         env:
           AUTOAPI_KEY: ${{ secrets.AUTOAPI_KEY }}
-        run: node diagnostic2.js
+        run: node  diagnostic-photos.js
