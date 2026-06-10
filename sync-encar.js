@@ -42,126 +42,55 @@ const CHANGE_ID_FILE = path.join(__dirname, '.last_change_id');
 // Format : { mark, model, year_from?, year_to? }
 // Ces filtres sont passés directement à l'API /offers
 const CIBLES = [
-  // ── FORD ──────────────────────────────────────────────
-  { mark: 'Ford', model: 'Mustang',    year_from: 2015, year_to: 2024 },
-  { mark: 'Ford', model: 'F150',       year_from: 2010, year_to: 2024 }, // F150 sans tiret
-  { mark: 'Ford', model: 'Expedition', year_from: 2018, year_to: 2024 },
-  { mark: 'Ford', model: 'Bronco',     year_from: 2021, year_to: 2024 },
+  // ── JAPONAISES ────────────────────────────────────────
+  { mark: 'Toyota' },
+  { mark: 'Nissan' },
+  { mark: 'Honda' },
+  { mark: 'Lexus' },
+  { mark: 'Mitsubishi' },
+  { mark: 'Mazda' },
+  { mark: 'Subaru' },
 
-  // ── DODGE (inclut RAM Pick Up) ────────────────────────
-  { mark: 'Dodge', model: 'Challenger' },
-  { mark: 'Dodge', model: 'Charger' },
-  { mark: 'Dodge', model: 'Ram Pick Up', year_from: 2010, year_to: 2024 }, // RAM 1500 sous Dodge
+  // ── AMÉRICAINES ───────────────────────────────────────
+  { mark: 'Ford' },
+  { mark: 'Dodge' },        // inclut Ram Pick Up
+  { mark: 'Chevrolet' },
+  { mark: 'Cadillac' },
+  { mark: 'Jeep' },
+  { mark: 'Hummer' },
+  { mark: 'GMC' },
 
-  // ── CHEVROLET ─────────────────────────────────────────
-  { mark: 'Chevrolet', model: 'Camaro',    year_from: 2010, year_to: 2024 },
-  { mark: 'Chevrolet', model: 'Corvette' },
-  { mark: 'Chevrolet', model: 'Tahoe' },
-  { mark: 'Chevrolet', model: 'Surburban' }, // typo Encar
-  { mark: 'Chevrolet', model: 'Silverado' },
-
-  // ── CADILLAC ──────────────────────────────────────────
-  { mark: 'Cadillac', model: 'Escalade' },
-
-  // ── JEEP ──────────────────────────────────────────────
-  { mark: 'Jeep', model: 'Wrangler',  year_from: 2007, year_to: 2024 },
-  { mark: 'Jeep', model: 'Gladiator' },
-  { mark: 'Jeep', model: 'Cherokee' }, // Grand Cherokee = Cherokee sur Encar
-
-  // ── VOLKSWAGEN ────────────────────────────────────────
-  { mark: 'Volkswagen', model: 'Golf' }, // Golf R inclus dans Golf
-
-  // ── BMW ───────────────────────────────────────────────
-  { mark: 'BMW', model: 'M2' },
-  { mark: 'BMW', model: 'M3' },
-  { mark: 'BMW', model: 'M4' },
-  { mark: 'BMW', model: 'M5' },
-  { mark: 'BMW', model: 'X5M' }, // sans espace
-  { mark: 'BMW', model: 'X6M' }, // sans espace
-  { mark: 'BMW', model: 'M8' },
-
-  // ── MERCEDES-BENZ ─────────────────────────────────────
-  { mark: 'Mercedes-Benz', model: 'C-Class'   }, // C63 AMG
-  { mark: 'Mercedes-Benz', model: 'E-Class'   }, // E63 AMG
-  { mark: 'Mercedes-Benz', model: 'CLS-Class' }, // CLS63
-  { mark: 'Mercedes-Benz', model: 'G-Class'   }, // G63, G350, G400
-  { mark: 'Mercedes-Benz', model: 'S-Class'   }, // S63, S560
-  // Maybach absent sur Encar
-
-  // ── AUDI ──────────────────────────────────────────────
-  { mark: 'Audi', model: 'RS3' },
-  // RS4 absent sur Encar
-  { mark: 'Audi', model: 'RS5' },
-  { mark: 'Audi', model: 'RS6' },
-  { mark: 'Audi', model: 'RS7' },
-  { mark: 'Audi', model: 'R8' },
-  { mark: 'Audi', model: 'SQ5' },
-  { mark: 'Audi', model: 'SQ7' },
-  { mark: 'Audi', model: 'SQ8' },
-  { mark: 'Audi', model: 'RSQ8' }, // sans espace
-
-  // ── PORSCHE ───────────────────────────────────────────
-  { mark: 'Porsche', model: 'Cayman' },
-  { mark: 'Porsche', model: 'Boxster' },
-  { mark: 'Porsche', model: '911' },
-  { mark: 'Porsche', model: 'Panamera' },
-  { mark: 'Porsche', model: 'Cayenne' },
-
-  // ── NISSAN ────────────────────────────────────────────
-  { mark: 'Nissan', model: '350Z' },
-  { mark: 'Nissan', model: '370Z' },
-  { mark: 'Nissan', model: 'GT-R' },
-  // Silvia absent sur Encar
-  { mark: 'Nissan', model: 'Skyline' },
-
-  // ── TOYOTA ────────────────────────────────────────────
-  // Land Cruiser absent → FJ Cruiser + 4Runner + Supra
-  { mark: 'Toyota', model: 'FJ Cruiser' },
-  { mark: 'Toyota', model: '4Runner' },
-  { mark: 'Toyota', model: 'Supra' },
-
-  // ── LEXUS ─────────────────────────────────────────────
-  { mark: 'Lexus', model: 'IS' }, // IS F inclus
-  { mark: 'Lexus', model: 'GS' }, // GS F inclus
-  // RC F et LC absents sur Encar
-  { mark: 'Lexus', model: 'LX' },
-
-  // ── HONDA ─────────────────────────────────────────────
-  { mark: 'Honda', model: 'Civic' }, // Civic Type R inclus
-  // S2000 et NSX absents sur Encar
-
-  // ── MAZDA ─────────────────────────────────────────────
-  // RX-7 et RX-8 absents sur Encar
-  { mark: 'Mazda', model: 'MX-5 Miata' }, // nom exact Encar
-
-  // ── MITSUBISHI ────────────────────────────────────────
-  { mark: 'Mitsubishi', model: 'Lancer Evolution' },
-  { mark: 'Mitsubishi', model: 'Pajero' },
-
-  // ── SUBARU ────────────────────────────────────────────
-  { mark: 'Subaru', model: 'Impreza' }, // WRX STI inclus
-  { mark: 'Subaru', model: 'Levorg' },
-
-  // ── BENTLEY — toute la marque ────────────────────────
-  { mark: 'Bentley' },
-
-  // ── ROLLS-ROYCE — toute la marque ────────────────────
-  { mark: 'Rolls-Royce' },
-
-  // ── MASERATI — toute la marque ───────────────────────
-  { mark: 'Maserati' },
-
-  // ── FERRARI — toute la marque ─────────────────────────
-  { mark: 'Ferrari' },
-
-  // ── LAMBORGHINI — toute la marque ────────────────────
-  { mark: 'Lamborghini' },
-
-  // ── MAYBACH — marque séparée sur Encar ───────────────
+  // ── ALLEMANDES ────────────────────────────────────────
+  { mark: 'Volkswagen' },
+  { mark: 'BMW' },
+  { mark: 'Mercedes-Benz' }, // inclut AMG
   { mark: 'Maybach' },
+  { mark: 'Audi' },
+  { mark: 'Porsche' },
 
-  // ── ASTON MARTIN — nom attaché sur Encar ─────────────
-  { mark: 'Astonmartin' },
+  // ── ITALIENNES ────────────────────────────────────────
+  { mark: 'Ferrari' },
+  { mark: 'Lamborghini' },
+  { mark: 'Maserati' },
+  { mark: 'Alfa Romeo' },
+  { mark: 'Fiat' },
+
+  // ── BRITANNIQUES ──────────────────────────────────────
+  { mark: 'Bentley' },
+  { mark: 'Rolls-Royce' },
+  { mark: 'Astonmartin' },  // nom exact Encar
+  { mark: 'Jaguar' },
+  { mark: 'Land Rover' },
+  { mark: 'Lotus' },
+  { mark: 'Mclaren' },      // nom exact Encar
+
+  // ── FRANÇAISES ────────────────────────────────────────
+  { mark: 'Peugeot' },
+
+  // ── ÉLECTRIQUES ───────────────────────────────────────
+  { mark: 'Tesla' },
+  { mark: 'BYD' },
+  { mark: 'Polestar' },
 ];
 
 // ── HELPERS ─────────────────────────────────────────────
