@@ -193,6 +193,29 @@ function mapTransmission(tr) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// images peut être un Array ou une String JSON selon auto-api.com
+function parseImages(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === 'string') {
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter(Boolean) : [];
+    } catch(e) {
+      // URL unique en string
+      return raw.startsWith('http') ? [raw] : [];
+    }
+  }
+  return [];
+}
+
+// Supprimer le filigrane Encar de l'URL
+function cleanImageUrl(url) {
+  if (!url) return '';
+  // Supprimer les paramètres de filigrane mais garder l'image de base
+  return url.split('?')[0];
+}
+
 // ── REQUÊTE /offers ──────────────────────────────────────
 async function fetchOffers(cible, page = 1) {
   const params = new URLSearchParams({ api_key: AUTOAPI_KEY, page });
@@ -250,9 +273,7 @@ function transformOffer(item) {
     historique:          car.extra?.accidents?.length
       ? `Accidents: ${car.extra.accidents.length}`
       : '',
-    photo_url:           Array.isArray(car.images) && car.images.length
-      ? car.images[0]
-      : '',
+    photo_url:           cleanImageUrl(parseImages(car.images)[0] || ''),
     statut:              'pub',
     mode_vente:          'marche',
     homolog_ok:          false,
@@ -283,13 +304,15 @@ async function upsertVehicle(sb, item) {
   }
 
   // Photos supplémentaires
-  if (Array.isArray(car.images) && car.images.length > 1) {
+  const imgs = parseImages(car.images);
+  if (imgs.length > 1) {
     const { data: row } = await sb
       .from('voitures').select('id').eq('encar_id', encarId).single();
     if (row) {
       await sb.from('voiture_photos').delete().eq('voiture_id', row.id);
+      // imgs déjà défini plus haut
       await sb.from('voiture_photos').insert(
-        car.images.map((url, i) => ({ voiture_id: row.id, url, position: i }))
+        imgs.map((url, i) => ({ voiture_id: row.id, url: cleanImageUrl(url), position: i }))
       );
     }
   }
