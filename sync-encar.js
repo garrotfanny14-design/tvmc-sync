@@ -33,10 +33,60 @@ const CIBLES = [
   { mark: 'Tesla' }, { mark: 'BYD' }, { mark: 'Polestar' },
 ];
 
+// ── TAUX DE CHANGE EN TEMPS RÉEL ─────────────────────
+let KRW_RATE = null;
+let JPY_RATE = null;
+
+async function fetchRate(currency) {
+  const apis = [
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${currency.toLowerCase()}.min.json`,
+    `https://open.er-api.com/v6/latest/${currency.toUpperCase()}`,
+    `https://api.exchangerate-api.com/v4/latest/${currency.toUpperCase()}`,
+  ];
+  
+  for (const url of apis) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      // Format fawazahmed0
+      if (data[currency.toLowerCase()]?.eur) return data[currency.toLowerCase()].eur;
+      // Format open.er-api
+      if (data.rates?.EUR) return data.rates.EUR;
+    } catch(e) { continue; }
+  }
+  return null;
+}
+
+async function fetchKrwRate() {
+  if (KRW_RATE) return KRW_RATE;
+  const rate = await fetchRate('krw');
+  KRW_RATE = rate || (1 / 1520);
+  const fallback = rate ? '' : ' (fallback)';
+  console.log('💱 KRW->EUR: 1 KRW = ' + KRW_RATE.toFixed(8) + ' EUR (1 EUR = ' + Math.round(1/KRW_RATE) + ' KRW)' + fallback);
+  return KRW_RATE;
+}
+
+async function fetchJpyRate() {
+  if (JPY_RATE) return JPY_RATE;
+  const rate = await fetchRate('jpy');
+  JPY_RATE = rate || (1 / 163);
+  const fallback = rate ? '' : ' (fallback)';
+  console.log('💱 JPY->EUR: 1 JPY = ' + JPY_RATE.toFixed(8) + ' EUR (1 EUR = ' + Math.round(1/JPY_RATE) + ' JPY)' + fallback);
+  return JPY_RATE;
+}
+
 // ── HELPERS ──────────────────────────────────────────────
-function priceToEur(price) {
+function priceToEur(price, currency = 'KRW') {
   if (!price) return 0;
-  return Math.round(price * 10000 * 0.00067);
+  if (currency === 'JPY') {
+    // Auto-api retourne le prix JPY directement (pas ×10000)
+    const rate = JPY_RATE || (1 / 163);
+    return Math.round(price * rate);
+  }
+  // KRW : auto-api retourne en unités de 10 000 KRW
+  const rate = KRW_RATE || (1 / 1520);
+  return Math.round(price * 10000 * rate);
 }
 
 function mapCarburant(engine_type) {
@@ -107,8 +157,8 @@ function transformOffer(item) {
     modele:              car.model || '',
     annee:               parseInt(car.year) || 2020,
     km:                  parseInt(car.km_age) || 0,
-    prix:                priceToEur(car.price),
-    pays:                'KR',
+    prix:                priceToEur(car.price, car.price_currency || 'KRW'),
+    pays:                (car.price_currency === 'JPY' || car.country === 'JP') ? 'JP' : 'KR',
     carburant:           mapCarburant(car.engine_type),
     carbu:               mapCarburant(car.engine_type),
     transmission:        mapTransmission(car.transmission_type),
@@ -247,6 +297,9 @@ async function main() {
   if (!AUTOAPI_KEY || !SUPABASE_URL || !SUPABASE_KEY) {
     console.error('❌ Variables manquantes'); process.exit(1);
   }
+
+  // Récupérer les taux de change du jour (KRW et JPY)
+  await Promise.all([fetchKrwRate(), fetchJpyRate()]);
 
   const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
     global: { fetch }, realtime: { transport: ws },
