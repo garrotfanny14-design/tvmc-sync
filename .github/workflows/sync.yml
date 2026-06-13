@@ -2,7 +2,6 @@ name: Sync auto-api.com → Supabase
 
 on:
   schedule:
-    # Tous les jours à 3h du matin UTC
     - cron: '0 3 * * *'
   workflow_dispatch:
 
@@ -12,43 +11,54 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
       - name: Install dependencies
         run: npm install
 
-      # Restaure le fichier .last_change_id entre les runs
       - name: Restore change_id cache
         uses: actions/cache@v4
         with:
           path: .last_change_id
-          key: last-change-id-${{ github.ref }}
-          restore-keys: last-change-id-
+          key: last-change-id-${{ github.ref }}-${{ github.run_number }}
+          restore-keys: last-change-id-${{ github.ref }}
+
+      - name: Restore progress cache (reprise après timeout)
+        uses: actions/cache@v4
+        with:
+          path: .sync_progress
+          key: sync-progress-${{ github.ref }}-${{ github.run_number }}
+          restore-keys: sync-progress-${{ github.ref }}
 
       - name: Run sync
         env:
-          AUTOAPI_KEY:  ${{ secrets.AUTOAPI_KEY }}
+          AUTOAPI_KEY: ${{ secrets.AUTOAPI_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: node sync-encar.js
 
-      # Sauvegarde le .last_change_id pour le prochain run
       - name: Save change_id cache
         uses: actions/cache@v4
+        if: always()
         with:
           path: .last_change_id
           key: last-change-id-${{ github.ref }}-${{ github.run_number }}
 
-      - name: Upload log
+      - name: Save progress cache
+        uses: actions/cache@v4
         if: always()
+        with:
+          path: .sync_progress
+          key: sync-progress-${{ github.ref }}-${{ github.run_number }}
+
+      - name: Upload log
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sync-log-${{ github.run_number }}
           path: sync.log
           retention-days: 30
+          if-no-files-found: warn
