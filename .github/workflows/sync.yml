@@ -1,37 +1,31 @@
 name: Sync auto-api.com → Supabase
-
 on:
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+# Empêche deux syncs de tourner en même temps (évite les conflits de commit d'état)
+concurrency:
+  group: sync-auto-api
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-
+    permissions:
+      contents: write   # nécessaire pour commit .last_change_id / .sync_progress
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install dependencies
         run: npm install
-
-      - name: Restore change_id cache
-        uses: actions/cache@v4
-        with:
-          path: .last_change_id
-          key: last-change-id-${{ github.ref }}-${{ github.run_number }}
-          restore-keys: last-change-id-${{ github.ref }}
-
-      - name: Restore progress cache (reprise après timeout)
-        uses: actions/cache@v4
-        with:
-          path: .sync_progress
-          key: sync-progress-${{ github.ref }}-${{ github.run_number }}
-          restore-keys: sync-progress-${{ github.ref }}
 
       - name: Run sync
         env:
@@ -40,19 +34,19 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: node sync-encar.js
 
-      - name: Save change_id cache
-        uses: actions/cache@v4
+      - name: Persist sync state (change_id + progress)
         if: always()
-        with:
-          path: .last_change_id
-          key: last-change-id-${{ github.ref }}-${{ github.run_number }}
-
-      - name: Save progress cache
-        uses: actions/cache@v4
-        if: always()
-        with:
-          path: .sync_progress
-          key: sync-progress-${{ github.ref }}-${{ github.run_number }}
+        run: |
+          git config user.name "tvmc-sync-bot"
+          git config user.email "actions@github.com"
+          git add -f .last_change_id .sync_progress 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update sync state [skip ci]"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          else
+            echo "Aucun changement d'état à committer"
+          fi
 
       - name: Upload log
         uses: actions/upload-artifact@v4
