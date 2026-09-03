@@ -183,24 +183,77 @@ function transformOffer(item) {
   };
 }
 
+// Conservée pour compatibilité (sync incrémental, véhicules ajoutés un par un — volume faible)
 async function upsertVehicle(sb, item) {
   const car     = item.data || item;
   const encarId = String(car.inner_id || car.id || '');
   if (!encarId) return;
 
   const payload = transformOffer(item);
-  const { error } = await sb.from('voitures').upsert(payload, { onConflict: 'encar_id' });
+  const { data: row, error } = await sb.from('voitures')
+    .upsert(payload, { onConflict: 'encar_id' })
+    .select('id')
+    .single();
   if (error) { console.log(`    ❌ ${encarId}: ${error.message}`); return; }
 
   // Photos
   const imgs = parseImages(car.images);
-  if (imgs.length > 0) {
-    const { data: row } = await sb.from('voitures').select('id').eq('encar_id', encarId).single();
-    if (row) {
-      await sb.from('voiture_photos').delete().eq('voiture_id', row.id);
-      await sb.from('voiture_photos').insert(
-        imgs.slice(0, 20).map((url, i) => ({ voiture_id: row.id, url: cleanImageUrl(url), position: i }))
-      );
+  if (imgs.length > 0 && row) {
+    await sb.from('voiture_photos').delete().eq('voiture_id', row.id);
+    await sb.from('voiture_photos').insert(
+      imgs.slice(0, 20).map((url, i) => ({ voiture_id: row.id, url: cleanImageUrl(url), position: i }))
+    );
+  }
+}
+
+// ── VERSION BATCH — traite une page entière (N véhicules) en 3 requêtes DB
+//    au lieu de N véhicules × 3 requêtes chacun. C'est ça qui divise la
+//    charge sur Supabase par ~20-50x pour le sync initial/complet.
+async function upsertVehiclesBatch(sb, items) {
+  const valid = items.filter(item => {
+    const car = item.data || item;
+    return String(car.inner_id || car.id || '') !== '';
+  });
+  if (valid.length === 0) return;
+
+  const payloads = valid.map(transformOffer);
+
+  // 1 seul upsert pour toute la page, on récupère direct les id générés
+  // (plus besoin d'un SELECT séparé par véhicule pour retrouver l'id)
+  const { data: upserted, error } = await sb.from('voitures')
+    .upsert(payloads, { onConflict: 'encar_id' })
+    .select('id, encar_id');
+  if (error) { console.log(`    ❌ batch upsert voitures: ${error.message}`); return; }
+
+  const idByEncarId = new Map(upserted.map(r => [r.encar_id, r.id]));
+
+  // Construire les lignes de photos pour TOUS les véhicules de la page
+  const voitureIds = [];
+  const photoRows  = [];
+  for (const item of valid) {
+    const car     = item.data || item;
+    const encarId = String(car.inner_id || car.id || '');
+    const voitureId = idByEncarId.get(encarId);
+    if (!voitureId) continue;
+
+    const imgs = parseImages(car.images);
+    if (imgs.length === 0) continue;
+
+    voitureIds.push(voitureId);
+    imgs.slice(0, 20).forEach((url, i) => {
+      photoRows.push({ voiture_id: voitureId, url: cleanImageUrl(url), position: i });
+    });
+  }
+
+  if (voitureIds.length > 0) {
+    // 1 seul DELETE pour toute la page (au lieu d'un par véhicule)
+    const { error: delErr } = await sb.from('voiture_photos').delete().in('voiture_id', voitureIds);
+    if (delErr) console.log(`    ⚠️  delete photos (batch): ${delErr.message}`);
+
+    // 1 seul INSERT pour toute la page (au lieu d'un par véhicule)
+    if (photoRows.length > 0) {
+      const { error: insErr } = await sb.from('voiture_photos').insert(photoRows);
+      if (insErr) console.log(`    ⚠️  insert photos (batch): ${insErr.message}`);
     }
   }
 }
@@ -232,7 +285,7 @@ async function syncMark(sb, cible) {
     const items = json.result || [];
     if (!items.length) break;
 
-    for (const item of items) await upsertVehicle(sb, item);
+    await upsertVehiclesBatch(sb, items);
     total += items.length;
 
     if (!json.meta?.next_page) break;
