@@ -301,7 +301,7 @@ async function syncMark(sb, cible) {
 // ── SYNC INCRÉMENTAL ─────────────────────────────────────
 async function syncIncremental(sb, lastChangeId) {
   console.log(`\n🔄 MODE INCRÉMENTAL — depuis change_id ${lastChangeId}`);
-  let changeId = lastChangeId, added = 0, updated = 0, removed = 0;
+  let changeId = lastChangeId, added = 0, updated = 0, removed = 0, pages = 0;
 
   while (true) {
     let json;
@@ -314,9 +314,12 @@ async function syncIncremental(sb, lastChangeId) {
     const changes = json.result || [];
     if (!changes.length) break;
 
-    for (const change of changes) {
+    // Traite tous les changements de la page EN PARALLÈLE (au lieu d'un par un,
+    // séquentiellement) — réduit fortement le temps perdu en latence réseau
+    // quand il y a un gros volume de changements à traiter.
+    await Promise.all(changes.map(async (change) => {
       const encarId = String(change.inner_id || '');
-      if (!encarId) continue;
+      if (!encarId) return;
       if (change.change_type === 'removed') {
         await sb.from('voitures').update({ statut: 'draft', updated_at: new Date().toISOString() }).eq('encar_id', encarId);
         removed++;
@@ -328,14 +331,28 @@ async function syncIncremental(sb, lastChangeId) {
         const isCible = CIBLES.some(c => c.mark.toLowerCase() === (car.mark || '').toLowerCase());
         if (isCible) { await upsertVehicle(sb, change); added++; }
       }
+    }));
+
+    pages++;
+    const nextId = json.meta?.next_change_id;
+
+    // ── CHECKPOINT CRITIQUE ─────────────────────────────────────────
+    // On sauvegarde la progression à CHAQUE page traitée, pas seulement
+    // à la toute fin. Si le job est interrompu (timeout GitHub Actions
+    // à 180 min, panne réseau, etc.), le prochain run reprendra ici au
+    // lieu de repartir de zéro et de re-timeout indéfiniment.
+    if (nextId) saveLastChangeId(nextId);
+
+    if (pages % 100 === 0) {
+      console.log(`  … page ${pages} — +${added} | ~${updated} prix | 🗑️ ${removed} retirées (checkpoint: ${nextId})`);
     }
 
-    changeId = json.meta?.next_change_id;
+    changeId = nextId;
     if (!changeId || changes.length < 20) break;
-    await sleep(200);
+    await sleep(50); // réduit de 200ms → 50ms : gain important sur un gros volume de pages
   }
 
-  console.log(`  ✅ +${added} | ~${updated} prix | 🗑️ ${removed} retirées`);
+  console.log(`  ✅ +${added} | ~${updated} prix | 🗑️ ${removed} retirées (${pages} pages)`);
   return changeId;
 }
 
