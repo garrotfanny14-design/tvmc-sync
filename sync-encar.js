@@ -155,6 +155,11 @@ function transformOffer(item) {
   // pas de prix de vente réel — l'API renvoie alors 0 ou une valeur dérisoire.
   // On les met en brouillon plutôt que de publier un prix faux/trompeur.
   const prixExploitable = car.price && prixCalcule >= 1000;
+  const devise = (car.price_currency === 'JPY' || car.country === 'JP') ? 'JPY' : 'KRW';
+  // Prix brut en devise d'origine (avant conversion) — permet de recalculer
+  // le prix EUR chaque jour avec le taux du jour, même si Encar ne signale
+  // aucun changement de prix sur cette annonce (voir refresh_prix_devise).
+  const prixOrigine = devise === 'JPY' ? (car.price || 0) : (car.price ? car.price * 10000 : 0);
   return {
     encar_id:            String(car.inner_id || car.id || ''),
     source:              'encar',
@@ -163,6 +168,8 @@ function transformOffer(item) {
     annee:               parseInt(car.year) || 2020,
     km:                  parseInt(car.km_age) || 0,
     prix:                prixCalcule,
+    prix_origine:        prixOrigine,
+    devise_origine:      devise,
     pays:                (car.price_currency === 'JPY' || car.country === 'JP') ? 'JP' : 'KR',
     carburant:           mapCarburant(car.engine_type),
     carbu:               mapCarburant(car.engine_type),
@@ -379,6 +386,21 @@ async function main() {
   const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
     global: { fetch }, realtime: { transport: ws },
   });
+
+  // ── RAFRAÎCHISSEMENT QUOTIDIEN DE TOUS LES PRIX ──────────────────
+  // Recalcule le prix EUR de TOUTES les annonces publiées avec le taux
+  // du jour, indépendamment du fait qu'Encar ait signalé un changement
+  // de prix ou non. Évite qu'une annonce ancienne affiche un prix figé
+  // au taux de change du jour de son dernier passage en base.
+  try {
+    const { data: nbKrw, error: errKrw } = await sb.rpc('refresh_prix_devise', { p_devise: 'KRW', p_taux: 1 / KRW_RATE });
+    const { data: nbJpy, error: errJpy } = await sb.rpc('refresh_prix_devise', { p_devise: 'JPY', p_taux: 1 / JPY_RATE });
+    if (errKrw) console.log(`  ⚠️  refresh_prix_devise KRW: ${errKrw.message}`);
+    if (errJpy) console.log(`  ⚠️  refresh_prix_devise JPY: ${errJpy.message}`);
+    console.log(`💰 Prix rafraîchis avec le taux du jour — ${nbKrw ?? 0} annonces KRW, ${nbJpy ?? 0} annonces JPY`);
+  } catch (e) {
+    console.log(`  ⚠️  Rafraîchissement des prix impossible: ${e.message}`);
+  }
 
   const lastChangeId = readLastChangeId();
 
