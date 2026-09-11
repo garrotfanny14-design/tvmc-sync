@@ -150,6 +150,11 @@ function clearProgress() {
 // ── TRANSFORM ────────────────────────────────────────────
 function transformOffer(item) {
   const car = item.data || item;
+  const prixCalcule = priceToEur(car.price, car.price_currency || 'KRW');
+  // Certaines annonces Encar (souvent du leasing/crédit "리스") ne communiquent
+  // pas de prix de vente réel — l'API renvoie alors 0 ou une valeur dérisoire.
+  // On les met en brouillon plutôt que de publier un prix faux/trompeur.
+  const prixExploitable = car.price && prixCalcule >= 1000;
   return {
     encar_id:            String(car.inner_id || car.id || ''),
     source:              'encar',
@@ -157,7 +162,7 @@ function transformOffer(item) {
     modele:              car.model || '',
     annee:               parseInt(car.year) || 2020,
     km:                  parseInt(car.km_age) || 0,
-    prix:                priceToEur(car.price, car.price_currency || 'KRW'),
+    prix:                prixCalcule,
     pays:                (car.price_currency === 'JPY' || car.country === 'JP') ? 'JP' : 'KR',
     carburant:           mapCarburant(car.engine_type),
     carbu:               mapCarburant(car.engine_type),
@@ -171,7 +176,7 @@ function transformOffer(item) {
     description:         '',
     historique:          '',
     photo_url:           cleanImageUrl(parseImages(car.images)[0] || ''),
-    statut:              'pub',
+    statut:              prixExploitable ? 'pub' : 'draft',
     mode_vente:          'marche',
     homolog_ok:          true,
     homolog_autres_pays: true,
