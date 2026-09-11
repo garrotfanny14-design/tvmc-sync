@@ -392,12 +392,24 @@ async function main() {
   // du jour, indépendamment du fait qu'Encar ait signalé un changement
   // de prix ou non. Évite qu'une annonce ancienne affiche un prix figé
   // au taux de change du jour de son dernier passage en base.
+  // Fait par PETITS LOTS successifs (3000 lignes à la fois) pour éviter
+  // le statement timeout sur un aussi gros volume (60 000+ annonces).
+  async function refreshPricesLoop(devise, taux) {
+    let total = 0, batch, iterations = 0;
+    do {
+      const { data, error } = await sb.rpc('refresh_prix_devise', { p_devise: devise, p_taux: taux, p_batch_size: 3000 });
+      if (error) { console.log(`  ⚠️  refresh_prix_devise ${devise}: ${error.message}`); break; }
+      batch = data || 0;
+      total += batch;
+      iterations++;
+    } while (batch > 0 && iterations < 200); // garde-fou anti-boucle infinie
+    return total;
+  }
+
   try {
-    const { data: nbKrw, error: errKrw } = await sb.rpc('refresh_prix_devise', { p_devise: 'KRW', p_taux: 1 / KRW_RATE });
-    const { data: nbJpy, error: errJpy } = await sb.rpc('refresh_prix_devise', { p_devise: 'JPY', p_taux: 1 / JPY_RATE });
-    if (errKrw) console.log(`  ⚠️  refresh_prix_devise KRW: ${errKrw.message}`);
-    if (errJpy) console.log(`  ⚠️  refresh_prix_devise JPY: ${errJpy.message}`);
-    console.log(`💰 Prix rafraîchis avec le taux du jour — ${nbKrw ?? 0} annonces KRW, ${nbJpy ?? 0} annonces JPY`);
+    const nbKrw = await refreshPricesLoop('KRW', 1 / KRW_RATE);
+    const nbJpy = await refreshPricesLoop('JPY', 1 / JPY_RATE);
+    console.log(`💰 Prix rafraîchis avec le taux du jour — ${nbKrw} annonces KRW, ${nbJpy} annonces JPY`);
   } catch (e) {
     console.log(`  ⚠️  Rafraîchissement des prix impossible: ${e.message}`);
   }
