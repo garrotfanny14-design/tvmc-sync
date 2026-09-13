@@ -164,7 +164,9 @@ function transformOffer(item) {
     encar_id:            String(car.inner_id || car.id || ''),
     source:              'encar',
     marque:              (car.mark || '').replace('Mercedes-Benz', 'Mercedes'),
-    modele:              car.model || '',
+    // 'configuration' porte la finition (GT, Sport, Limited...) qui manquait —
+    // sans elle, "Mustang GT" devenait juste "Mustang". Voir doc auto-api.com.
+    modele:              [car.model, car.configuration].filter(Boolean).join(' ') || '',
     annee:               parseInt(car.year) || 2020,
     km:                  parseInt(car.km_age) || 0,
     prix:                prixCalcule,
