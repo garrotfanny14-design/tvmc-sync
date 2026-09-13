@@ -182,7 +182,9 @@ function transformOffer(item) {
     type_vehicule:       car.body_type || 'Berline',
     nb_portes:           4,
     etat_general:        'Bon',
-    description:         '',
+    // 'complectation' (doc auto-api.com) porte la liste d'équipements/finition
+    // — c'était vide avant car ce champ n'était pas mappé.
+    description:         car.complectation || '',
     historique:          '',
     photo_url:           cleanImageUrl(parseImages(car.images)[0] || ''),
     statut:              prixExploitable ? 'pub' : 'draft',
