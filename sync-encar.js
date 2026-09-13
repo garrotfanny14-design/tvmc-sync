@@ -182,10 +182,14 @@ function transformOffer(item) {
     type_vehicule:       car.body_type || 'Berline',
     nb_portes:           4,
     etat_general:        'Bon',
-    // 'complectation' (doc auto-api.com) porte la liste d'équipements/finition
-    // — c'était vide avant car ce champ n'était pas mappé.
-    description:         car.complectation || '',
-    historique:          '',
+    // 'options' (doc officielle auto-api.com/encar) = vraie liste d'équipements
+    // structurée (toit ouvrant, sièges chauffants, etc.) — pas le texte de
+    // vente du vendeur. 'complectation' testé précédemment était le mauvais champ.
+    description:         Array.isArray(car.options) ? car.options.join(' - ') : '',
+    // 'extra.accidents' (JSON structuré) donne l'historique accidents si dispo
+    historique:           (car.extra && Array.isArray(car.extra.accidents))
+                            ? (car.extra.accidents.length ? `${car.extra.accidents.length} accident(s) déclaré(s)` : 'Aucun accident déclaré')
+                            : '',
     photo_url:           cleanImageUrl(parseImages(car.images)[0] || ''),
     statut:              prixExploitable ? 'pub' : 'draft',
     mode_vente:          'marche',
