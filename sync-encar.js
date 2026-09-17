@@ -153,8 +153,16 @@ function transformOffer(item) {
   const prixCalcule = priceToEur(car.price, car.price_currency || 'KRW');
   // Certaines annonces Encar (souvent du leasing/crédit "리스") ne communiquent
   // pas de prix de vente réel — l'API renvoie alors 0 ou une valeur dérisoire.
-  // On les met en brouillon plutôt que de publier un prix faux/trompeur.
   const prixExploitable = car.price && prixCalcule >= 1000;
+  // advertisementType (confirmé par le support auto-api.com) distingue une
+  // vente classique (NORMAL, ~97% des annonces) des locations/leasings
+  // (RENT_SUCCESSION, RENT_CAR, OPERATING_LEASE, FINANCING_LEASE) — pour ces
+  // dernières, le "prix" correspond à un loyer, pas à la valeur du véhicule,
+  // et n'est donc PAS comparable à un prix de vente. On ne garde que NORMAL.
+  const estVenteNormale = !car.advertisementType || car.advertisementType === 'NORMAL';
+  // salesStatus signale une vente déjà en cours (le véhicule va bientôt
+  // disparaître d'Encar) — on ne le publie pas non plus.
+  const venteEnCours = car.salesStatus === 'CONTRACT' || car.salesStatus === 'CONTRACT_PROGRESS';
   const devise = (car.price_currency === 'JPY' || car.country === 'JP') ? 'JPY' : 'KRW';
   // Prix brut en devise d'origine (avant conversion) — permet de recalculer
   // le prix EUR chaque jour avec le taux du jour, même si Encar ne signale
@@ -191,7 +199,7 @@ function transformOffer(item) {
                             ? (car.extra.accidents.length ? `${car.extra.accidents.length} accident(s) déclaré(s)` : 'Aucun accident déclaré')
                             : '',
     photo_url:           cleanImageUrl(parseImages(car.images)[0] || ''),
-    statut:              prixExploitable ? 'pub' : 'draft',
+    statut:              (prixExploitable && estVenteNormale && !venteEnCours) ? 'pub' : 'draft',
     mode_vente:          'marche',
     homolog_ok:          true,
     homolog_autres_pays: true,
@@ -376,6 +384,46 @@ async function syncIncremental(sb, lastChangeId) {
   return changeId;
 }
 
+// ── EXCLUSION LEASING/VENTE-EN-COURS/DOUBLONS ────────────────────
+// Endpoint dédié fourni par le support auto-api.com : renvoie directement
+// les inner_id à exclure du catalogue, en plus du filtre advertisementType
+// déjà appliqué à l'import (utile pour purger ce qui est déjà en base).
+async function fetchExclusions() {
+  try {
+    const res = await fetch(`${API_BASE}/details?api_key=${AUTOAPI_KEY}`);
+    if (!res.ok) { console.log(`  ⚠️  /details HTTP ${res.status}`); return null; }
+    return await res.json();
+  } catch (e) {
+    console.log(`  ⚠️  /details: ${e.message}`);
+    return null;
+  }
+}
+
+async function applyExclusions(sb) {
+  const details = await fetchExclusions();
+  if (!details) return { rentLease: 0, contract: 0 };
+
+  async function draftBatch(ids, label) {
+    if (!ids || !ids.length) return 0;
+    let total = 0;
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500).map(String);
+      const { error, count } = await sb.from('voitures')
+        .update({ statut: 'draft', updated_at: new Date().toISOString() }, { count: 'exact' })
+        .eq('source', 'encar').eq('statut', 'pub').in('encar_id', chunk);
+      if (error) { console.log(`  ⚠️  exclusion ${label}: ${error.message}`); continue; }
+      total += count || 0;
+    }
+    return total;
+  }
+
+  const nbRentLease = await draftBatch(details.RENT_LEASE, 'RENT_LEASE');
+  const nbContract  = await draftBatch(details.CONTRACT, 'CONTRACT');
+  const nbDuplicate = await draftBatch(details.DUPLICATE, 'DUPLICATE');
+  console.log(`🧹 Exclusions appliquées — ${nbRentLease} leasing/location, ${nbContract} vente en cours, ${nbDuplicate} doublons`);
+  return { rentLease: nbRentLease, contract: nbContract, duplicate: nbDuplicate };
+}
+
 // ── MAIN ────────────────────────────────────────────────
 async function main() {
   const startTime = Date.now();
@@ -421,6 +469,11 @@ async function main() {
   } catch (e) {
     console.log(`  ⚠️  Rafraîchissement des prix impossible: ${e.message}`);
   }
+
+  // ── NETTOYAGE LEASING / VENTE-EN-COURS / DOUBLONS ────────────────
+  // Purge ce qui a déjà été importé avant le filtre advertisementType,
+  // et rattrape les annonces qui basculent en CONTRACT après coup.
+  await applyExclusions(sb);
 
   const lastChangeId = readLastChangeId();
 
