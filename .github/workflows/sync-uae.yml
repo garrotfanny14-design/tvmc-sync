@@ -32,7 +32,7 @@ jobs:
           AUTOAPI_UAE_KEY: ${{ secrets.AUTOAPI_UAE_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: node sync-uae.js >> sync-uae.log 2>&1
+        run: node sync-uae.js
 
       - name: Persist sync state (change_id + progress)
         run: |
