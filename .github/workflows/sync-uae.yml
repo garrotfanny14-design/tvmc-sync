@@ -1,0 +1,49 @@
+name: Sync Dubicars + Dubizzle → Supabase
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+# Empêche deux syncs de tourner en même temps (évite les conflits de commit d'état)
+concurrency:
+  group: sync-uae
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write   # nécessaire pour commit .last_change_id_* / .sync_progress_*
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run sync
+        env:
+          AUTOAPI_UAE_KEY: ${{ secrets.AUTOAPI_UAE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: node sync-uae.js >> sync-uae.log 2>&1
+
+      - name: Persist sync state (change_id + progress)
+        run: |
+          git config user.name "tvmc-sync-bot"
+          git config user.email "actions@github.com"
+          git add .last_change_id_dubicars .last_change_id_dubizzle .sync_progress_dubicars .sync_progress_dubizzle 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "chore: update UAE sync state [skip ci]"
+          git push
+
+      - name: Upload log
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-uae-log
+          path: sync-uae.log
