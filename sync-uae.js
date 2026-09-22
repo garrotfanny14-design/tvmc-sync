@@ -53,7 +53,7 @@ async function fetchRate(currency) {
   ];
   for (const url of apis) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { timeout: 15000 });
       if (!res.ok) continue;
       const data = await res.json();
       if (data[currency.toLowerCase()]?.eur) return data[currency.toLowerCase()].eur;
@@ -202,7 +202,7 @@ async function syncMark(sb, src, cible) {
     const params = new URLSearchParams({ api_key: AUTOAPI_UAE_KEY, page, mark: cible.mark });
     let json;
     try {
-      const res = await fetch(`${src.apiBase}/offers?${params}`);
+      const res = await fetch(`${src.apiBase}/offers?${params}`, { timeout: 20000 });
       if (!res.ok) {
         console.log(`  ⚠️  ${label} p.${page}: HTTP ${res.status}`);
         break;
@@ -237,7 +237,7 @@ async function syncIncremental(sb, src, lastChangeId) {
   while (true) {
     let json;
     try {
-      const res = await fetch(`${src.apiBase}/changes?api_key=${AUTOAPI_UAE_KEY}&change_id=${changeId}`);
+      const res = await fetch(`${src.apiBase}/changes?api_key=${AUTOAPI_UAE_KEY}&change_id=${changeId}`, { timeout: 20000 });
       if (!res.ok) { console.log(`  ⚠️  /changes HTTP ${res.status}`); break; }
       json = await res.json();
     } catch (err) { console.log(`  ⚠️  /changes: ${err.message}`); break; }
@@ -299,7 +299,7 @@ async function syncSource(sb, src) {
       console.log(`\n🆕 Premier lancement ${src.label} → sync initial complet`);
       try {
         const today = new Date().toISOString().split('T')[0];
-        const res = await fetch(`${src.apiBase}/change_id?api_key=${AUTOAPI_UAE_KEY}&date=${today}`);
+        const res = await fetch(`${src.apiBase}/change_id?api_key=${AUTOAPI_UAE_KEY}&date=${today}`, { timeout: 15000 });
         if (res.ok) {
           const j = await res.json();
           saveLastChangeId(src.key, j.change_id);
