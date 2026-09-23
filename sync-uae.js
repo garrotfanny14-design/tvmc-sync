@@ -348,6 +348,28 @@ async function main() {
     global: { fetch }, realtime: { transport: ws },
   });
 
+  // ── DIAGNOSTIC : liste réelle des marques disponibles par source ──
+  // Certaines marques de CIBLES ('Mercedes-Benz', 'Rolls-Royce', 'Astonmartin',
+  // 'Maybach') sont remontées "aucun résultat" alors qu'elles existent bien
+  // sur les sites — probablement une orthographe différente côté API par
+  // rapport à ce qu'on utilise pour Encar. On liste ici les vraies valeurs
+  // pour comparer et corriger CIBLES si besoin.
+  for (const src of SOURCES) {
+    try {
+      const res = await fetch(`${src.apiBase}/filters?api_key=${AUTOAPI_UAE_KEY}`, { timeout: 15000 });
+      if (res.ok) {
+        const json = await res.json();
+        const marques = Object.keys(json.mark || {}).sort();
+        console.log(`\n🔎 ${src.label} — ${marques.length} marques disponibles côté API :`);
+        console.log('   ' + marques.join(', '));
+      } else {
+        console.log(`  ⚠️  ${src.label} /filters HTTP ${res.status}`);
+      }
+    } catch (e) {
+      console.log(`  ⚠️  ${src.label} /filters: ${e.message}`);
+    }
+  }
+
   for (const src of SOURCES) {
     try {
       await syncSource(sb, src);
