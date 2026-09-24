@@ -176,8 +176,19 @@ async function upsertVehicle(sb, item, src) {
   const innerId = String(car.inner_id || car.id || '');
   if (!innerId) return;
   const payload = transformOffer(item, src);
-  const { error } = await sb.from('voitures').upsert(payload, { onConflict: 'encar_id' });
-  if (error) console.log(`    ❌ ${payload.encar_id}: ${error.message}`);
+  const { data: row, error } = await sb.from('voitures')
+    .upsert(payload, { onConflict: 'encar_id' })
+    .select('id')
+    .single();
+  if (error) { console.log(`    ❌ ${payload.encar_id}: ${error.message}`); return; }
+
+  const imgs = Array.isArray(car.images) ? car.images.filter(Boolean) : [];
+  if (imgs.length > 0 && row) {
+    await sb.from('voiture_photos').delete().eq('voiture_id', row.id);
+    await sb.from('voiture_photos').insert(
+      imgs.slice(0, 20).map((url, i) => ({ voiture_id: row.id, url: cleanImageUrl(url), position: i }))
+    );
+  }
 }
 
 // Version batch — traite une page entière (N véhicules) en 1 requête DB
@@ -188,9 +199,43 @@ async function upsertVehiclesBatch(sb, items, src) {
     return String(car.inner_id || car.id || '') !== '';
   });
   if (valid.length === 0) return;
+
   const payloads = valid.map(item => transformOffer(item, src));
-  const { error } = await sb.from('voitures').upsert(payloads, { onConflict: 'encar_id' });
-  if (error) console.log(`    ❌ batch upsert ${src.label}: ${error.message}`);
+
+  // 1 seul upsert pour toute la page, on récupère direct les id générés
+  const { data: upserted, error } = await sb.from('voitures')
+    .upsert(payloads, { onConflict: 'encar_id' })
+    .select('id, encar_id');
+  if (error) { console.log(`    ❌ batch upsert ${src.label}: ${error.message}`); return; }
+
+  const idByEncarId = new Map(upserted.map(r => [r.encar_id, r.id]));
+
+  // ── Galerie photos (voiture_photos) — manquait dans la version initiale ──
+  const voitureIds = [];
+  const photoRows  = [];
+  for (const item of valid) {
+    const car = item.data || item;
+    const innerId = String(car.inner_id || car.id || '');
+    const voitureId = idByEncarId.get(`${src.prefix}-${innerId}`);
+    if (!voitureId) continue;
+
+    const imgs = Array.isArray(car.images) ? car.images.filter(Boolean) : [];
+    if (imgs.length === 0) continue;
+
+    voitureIds.push(voitureId);
+    imgs.slice(0, 20).forEach((url, i) => {
+      photoRows.push({ voiture_id: voitureId, url: cleanImageUrl(url), position: i });
+    });
+  }
+
+  if (voitureIds.length > 0) {
+    const { error: delErr } = await sb.from('voiture_photos').delete().in('voiture_id', voitureIds);
+    if (delErr) console.log(`    ⚠️  delete photos ${src.label} (batch): ${delErr.message}`);
+    if (photoRows.length > 0) {
+      const { error: insErr } = await sb.from('voiture_photos').insert(photoRows);
+      if (insErr) console.log(`    ⚠️  insert photos ${src.label} (batch): ${insErr.message}`);
+    }
+  }
 }
 
 // ── SYNC UNE MARQUE (chargement initial) ─────────────────
