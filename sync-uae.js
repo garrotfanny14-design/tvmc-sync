@@ -47,6 +47,7 @@ const MARK_QUERY_OVERRIDES = {
     'Mercedes-Benz': 'Mercedes Benz',
     'Maybach':       'Mercedes Maybach',
     'Astonmartin':   'Aston Martin',
+    'Rolls-Royce':   'Rolls Royce',
   },
   dubizzle: {
     'Maybach':       'Mercedes-Maybach',
