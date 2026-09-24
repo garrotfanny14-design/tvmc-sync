@@ -39,6 +39,24 @@ const CIBLES = [
   { mark: 'Tesla' }, { mark: 'BYD' }, { mark: 'Polestar' },
 ];
 
+// Certaines marques de CIBLES ont une orthographe différente selon la source
+// (confirmé via le diagnostic /filters) — on garde CIBLES comme référentiel
+// interne commun, et on traduit juste pour la requête API à chaque source.
+const MARK_QUERY_OVERRIDES = {
+  dubicars: {
+    'Mercedes-Benz': 'Mercedes Benz',
+    'Maybach':       'Mercedes Maybach',
+    'Astonmartin':   'Aston Martin',
+  },
+  dubizzle: {
+    'Maybach':       'Mercedes-Maybach',
+    'Astonmartin':   'Aston Martin',
+  },
+};
+function apiMarkFor(src, mark) {
+  return (MARK_QUERY_OVERRIDES[src.key] && MARK_QUERY_OVERRIDES[src.key][mark]) || mark;
+}
+
 // ── TAUX DE CHANGE EN TEMPS RÉEL (AED → EUR) ─────────────────
 // Même mécanisme que KRW/JPY dans sync-encar.js : 3 sources en cascade,
 // avec repli sur un taux fixe si tout échoue (AED est arrimé au USD
@@ -96,6 +114,19 @@ function mapTransmission(tr) {
   return 'Automatique';
 }
 
+// Uniformise l'orthographe de la marque quelle que soit la source (Dubicars
+// et Dubizzle n'utilisent pas toujours les mêmes espaces/tirets) pour rester
+// cohérent avec la liste de marques déjà utilisée par le filtre du site.
+const MARQUE_NORMALISATION = {
+  'Mercedes-Benz': 'Mercedes', 'Mercedes Benz': 'Mercedes',
+  'Mercedes-Maybach': 'Maybach', 'Mercedes Maybach': 'Maybach',
+  'Aston Martin': 'Astonmartin',
+};
+function normalizeMarque(raw) {
+  const m = (raw || '').trim();
+  return MARQUE_NORMALISATION[m] || m;
+}
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function cleanImageUrl(url) { return url ? url.split('?')[0] : ''; }
@@ -136,7 +167,7 @@ function transformOffer(item, src) {
   return {
     encar_id:            `${src.prefix}-${innerId}`,
     source:              src.key,
-    marque:              (car.mark || '').replace('Mercedes-Benz', 'Mercedes'),
+    marque:              normalizeMarque(car.mark),
     modele:              [car.model, car.configuration].filter(Boolean).join(' ') || '',
     annee:               parseInt(car.year) || 2020,
     km:                  parseInt(car.km_age) || 0,
@@ -244,7 +275,7 @@ async function syncMark(sb, src, cible) {
   let page = 1, total = 0;
 
   while (true) {
-    const params = new URLSearchParams({ api_key: AUTOAPI_UAE_KEY, page, mark: cible.mark });
+    const params = new URLSearchParams({ api_key: AUTOAPI_UAE_KEY, page, mark: apiMarkFor(src, cible.mark) });
     let json;
     try {
       const res = await fetch(`${src.apiBase}/offers?${params}`, { timeout: 20000 });
@@ -302,7 +333,11 @@ async function syncIncremental(sb, src, lastChangeId) {
         updated++;
       } else if (change.change_type === 'added') {
         const car = change.data || {};
-        const isCible = CIBLES.some(c => c.mark.toLowerCase() === (car.mark || '').toLowerCase());
+        const carMarkLower = (car.mark || '').toLowerCase();
+        const isCible = CIBLES.some(c =>
+          c.mark.toLowerCase() === carMarkLower ||
+          apiMarkFor(src, c.mark).toLowerCase() === carMarkLower
+        );
         if (isCible) { await upsertVehicle(sb, change, src); added++; }
       }
     }));
@@ -406,13 +441,40 @@ async function main() {
         const json = await res.json();
         const marques = Object.keys(json.mark || {}).sort();
         console.log(`\n🔎 ${src.label} — ${marques.length} marques disponibles côté API :`);
-        console.log('   ' + marques.join(', '));
+        // Par petits paquets pour ne jamais être tronqué par une limite de
+        // longueur de ligne côté GitHub Actions (déjà arrivé une fois).
+        for (let i = 0; i < marques.length; i += 10) {
+          console.log('   ' + marques.slice(i, i + 10).join(', '));
+        }
       } else {
         console.log(`  ⚠️  ${src.label} /filters HTTP ${res.status}`);
       }
     } catch (e) {
       console.log(`  ⚠️  ${src.label} /filters: ${e.message}`);
     }
+  }
+
+  // ── RATTRAPAGE PONCTUEL : marques dont l'orthographe vient d'être corrigée
+  // Ces marques ont eu "aucun résultat" lors du tout premier sync (mauvaise
+  // orthographe côté requête) — le mode incrémental ne les rattrapera JAMAIS
+  // tout seul (il ne détecte que les nouvelles annonces, pas le stock déjà
+  // existant avant le correctif). On les recharge une seule fois, puis on
+  // ne retouche plus rien (marqueur de fichier).
+  const CATCHUP_FILE = path.join(__dirname, '.catchup_marques_corrigees');
+  if (!fs.existsSync(CATCHUP_FILE)) {
+    const RATTRAPAGE = {
+      dubicars: ['Mercedes-Benz', 'Maybach', 'Astonmartin', 'Rolls-Royce'],
+      dubizzle: ['Astonmartin'],
+    };
+    console.log(`\n🩹 RATTRAPAGE PONCTUEL — marques corrigées (une seule fois)`);
+    for (const src of SOURCES) {
+      for (const mark of (RATTRAPAGE[src.key] || [])) {
+        await syncMark(sb, src, { mark });
+        await sleep(300);
+      }
+    }
+    fs.writeFileSync(CATCHUP_FILE, new Date().toISOString());
+    console.log(`✅ Rattrapage terminé — ne se relancera plus`);
   }
 
   for (const src of SOURCES) {
