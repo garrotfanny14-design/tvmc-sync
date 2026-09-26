@@ -133,6 +133,20 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function cleanImageUrl(url) { return url ? url.split('?')[0] : ''; }
 
+// L'API renvoie parfois 'images' comme une chaîne JSON ("[\"http://...\"]")
+// au lieu d'un vrai tableau — sans cette fonction, car.images[0] sur une
+// chaîne renvoie juste son 1er caractère ("["), pas une URL. Même bug que
+// celui déjà géré côté Encar (sync-encar.js).
+function parseImages(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === 'string') {
+    try { const a = JSON.parse(raw); return Array.isArray(a) ? a.filter(Boolean) : []; }
+    catch (e) { return raw.startsWith('http') ? [raw] : []; }
+  }
+  return [];
+}
+
 // ── FICHIERS D'ÉTAT (un jeu par source) ──────────────────
 function changeIdFile(source) { return path.join(__dirname, `.last_change_id_${source}`); }
 function progressFile(source) { return path.join(__dirname, `.sync_progress_${source}`); }
@@ -190,7 +204,7 @@ function transformOffer(item, src) {
     // — pas une liste d'équipements exploitable, donc on ne la stocke pas.
     description:         '',
     historique:          '',
-    photo_url:           cleanImageUrl((car.images && car.images[0]) || ''),
+    photo_url:           cleanImageUrl(parseImages(car.images)[0] || ''),
     statut:              prixExploitable ? 'pub' : 'draft',
     mode_vente:          'marche',
     homolog_ok:          true,
@@ -215,7 +229,7 @@ async function upsertVehicle(sb, item, src) {
     .single();
   if (error) { console.log(`    ❌ ${payload.encar_id}: ${error.message}`); return; }
 
-  const imgs = Array.isArray(car.images) ? car.images.filter(Boolean) : [];
+  const imgs = parseImages(car.images);
   if (imgs.length > 0 && row) {
     await sb.from('voiture_photos').delete().eq('voiture_id', row.id);
     await sb.from('voiture_photos').insert(
@@ -252,7 +266,7 @@ async function upsertVehiclesBatch(sb, items, src) {
     const voitureId = idByEncarId.get(`${src.prefix}-${innerId}`);
     if (!voitureId) continue;
 
-    const imgs = Array.isArray(car.images) ? car.images.filter(Boolean) : [];
+    const imgs = parseImages(car.images);
     if (imgs.length === 0) continue;
 
     voitureIds.push(voitureId);
