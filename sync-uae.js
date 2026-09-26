@@ -122,6 +122,7 @@ const MARQUE_NORMALISATION = {
   'Mercedes-Benz': 'Mercedes', 'Mercedes Benz': 'Mercedes',
   'Mercedes-Maybach': 'Maybach', 'Mercedes Maybach': 'Maybach',
   'Aston Martin': 'Astonmartin',
+  'Rolls Royce': 'Rolls-Royce',
 };
 function normalizeMarque(raw) {
   const m = (raw || '').trim();
